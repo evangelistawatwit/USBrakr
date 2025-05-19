@@ -51,3 +51,5 @@ def main():
     print(f"SHA256: {sha256}")
     # return 0
     return 0
+
+main()
