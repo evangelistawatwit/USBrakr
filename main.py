@@ -20,7 +20,7 @@ def get_hash(file_path, hash_func):
         # read file in chunks of 4K
         for byte_block in iter(lambda: f.read(4096), b""):
             hash_object.update(byte_block)
-
+    f.close()
     # return the hex representation of the hash
     return hash_object.hexdigest()
 
