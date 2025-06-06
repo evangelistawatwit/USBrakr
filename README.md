@@ -15,9 +15,9 @@ ex. command
 ```
 ## Authors
 Conner Pattison
-[@patt-co]
+[patt-co]
 William Evangelista
-[@evangelistawatwit]
+[evangelistawatwit]
 ## Version History
 * 0.01
     * Local virus scanner
