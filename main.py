@@ -7,17 +7,18 @@ import hashlib
 import sys
 import os
 import csv
-import pandas as pd # used for getting the specific columns
 from zipfile import ZipFile
 from urllib.request import urlopen
+import subprocess
+import psutil
 
 # setup and install wget if not already installed
 try:
-    import wget
+    import wget, pandas as pd
 except ImportError:
     print("wget not found, installing...")
-    os.system('pip install wget')
-    import wget
+    os.system('pip install wget pandas')
+    import wget, pandas as pd
 
 # predownloaded CSV file for compatibility testing
 csv_list = "full.csv"
@@ -107,13 +108,13 @@ def format_drive(drive_path):
     # check if the drive exists
     if not drive_path.endswith(':'):
         drive_path += ':'
-    if drive_path[0] not in ['C', 'D']:
+    if drive_path[0] not in ['C']:
         if not os.path.exists(drive_path):
             print(f"Drive {drive_path} does not exist.")
             return False
     
-    # format the drive
-        os.system(f'format {drive_path} /FS:NTFS /Q /V:USBrakr /X')
+    # format the drive with 512 megabytes
+        os.system(f'format {drive_path} /FS:NTFS /Q /V:USBDrive /X /Y')
         return True
     else:
         print(f"Drive {drive_path} is a system drive and cannot be formatted.")
@@ -122,7 +123,7 @@ def format_drive(drive_path):
 # returns a list of all drives on the system
 def get_drives():
     # get all drives
-    drives = [f"{d}:" for d in "ABEFGHIJKLMNOPQRSTUVWXYZ" if os.path.exists(f"{d}:")]
+    drives = [f"{d}:" for d in "ABDEFGHIJKLMNOPQRSTUVWXYZ" if os.path.exists(f"{d}:")]
     return drives
 
 # appends a partition (default 512 kilobytes) to the given drive
@@ -131,15 +132,49 @@ def append_partition(drive_path, partition_size=512 * 1024):
     # check if the drive exists
     if not drive_path.endswith(':'):
         drive_path += ':'
-    if drive_path[0] not in ['C', 'D']:
+    if drive_path[0] not in ['C']:
         if not os.path.exists(drive_path):
             print(f"Drive {drive_path} does not exist.")
             return False
-    elif drive_path[0] in ['C', 'D']:
+    elif drive_path[0] in ['C']:
         print(f"Drive {drive_path} is a system drive and cannot be modified.")
         return False
     
-    # this is where the partitioning would happen but I can't figure it out rn
+    # grabs the disk number of the drive
+    try:
+        drive_letter = drive_path[0]
+        ps_cmd = (
+            f"Get-Partition -DriveLetter {drive_letter} | "
+            "Get-Disk | "
+            "Select-Object -ExpandProperty Number"
+        )
+        output = subprocess.check_output(
+            ["powershell", "-Command", ps_cmd],
+            universal_newlines=True
+        )
+        disk_number = output.strip()
+        if disk_number.isdigit():
+            print(f"Disk number for drive {drive_path} is {disk_number}.")
+        else:
+            print(f"Could not determine disk number for drive {drive_path}.")
+            return False
+    except Exception as e:
+        print(f"Error determining disk number: {e}")
+        return False
+    # create a new partition of the given size
+    try:
+        partition_cmd = (
+            f"New-Partition -DiskNumber {disk_number} -Size {partition_size} "
+            "-AssignDriveLetter | "
+            "Format-Volume -FileSystem NTFS -NewFileSystemLabel 'USBDrive' -Confirm:$false"
+        )
+        subprocess.run(["powershell", "-Command", partition_cmd], check=True)
+        print(f"Partition of size {partition_size} bytes created on drive {drive_path}.")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error creating partition: {e}")
+        return False
+
 
 # gets file size
 def get_file_size(file_path):
@@ -164,8 +199,11 @@ def main():
             print(drive)
         print("Enter the USB drive letter to format (e.g., E, F):")
         drive_letter = input().strip().upper()
-        if format_drive(drive_letter):
-            print(f"Drive {drive_letter} formatted successfully.")
+        if input(f"Are you sure you want to format drive {drive_letter}? This will erase all data on the drive. (y/N) ").strip().lower() == 'y':
+            if format_drive(drive_letter):
+                print(f"Drive {drive_letter} formatted successfully.")
+        else:
+            print("Drive formatting cancelled.")
     else:
         print("Skipping drive formatting.")
     # update the CSV file if the user already has it
@@ -223,14 +261,22 @@ def main():
                 print(drive)
             print("Enter the USB drive letter to append the partition (e.g., E, F):")
             drive_letter = input().strip().upper()
-            if append_partition(drive_letter, size + 512 * 1024):
-                # copy the file to the new partition
-                new_partition_path = f"{drive_letter}\\{name}"
-                os.system(f'copy "{path}" "{new_partition_path}"')
-                print(f"File {name} copied to new partition {drive_letter}.")
-                # delete the original file
-                os.remove(path)
-                print(f"Original file {path} deleted.")
+            if append_partition(drive_letter, size + 512 * 1024 * 1024):
+                # copy the file to the new partition (next letter after the drive letter)
+                new_drive_letter = chr(ord(drive_letter) + 1)
+                new_file_path = f"{new_drive_letter}:/{name}"
+                try:
+                    os.makedirs(f"{new_drive_letter}:/", exist_ok=True)
+                    with open(path, 'rb') as src_file:
+                        with open(new_file_path, 'wb') as dest_file:
+                            dest_file.write(src_file.read())
+                    print(f"File copied to {new_file_path}.")
+                    # delete the original file
+                    os.remove(path)
+                    print(f"Original file {path} deleted.")
+                except Exception as e:
+                    print(f"Error copying file: {e}")
+                
             
         else:
             print("Skipping partition appending.")
