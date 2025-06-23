@@ -66,41 +66,82 @@ def get_hash(file_path, hash_func):
     # return the hex representation of the hash
     return('"' + hash_object.hexdigest() + '"')
 
-# Returns the gievn file's hash if it exists in the given CSV file
+# Returns the given file's hash if it exists in the given CSV file
 def compare_to_csv(file_path):
     # read the CSV file
-    flagged_hashes = []
-    mb_list = pd.read_csv(csv_list, on_bad_lines='skip', skiprows=[0,1,2,3,4,5,6,7,8], usecols=[1,2,3,4], header=None)
+    mb_list = pd.read_csv(
+        csv_list, 
+        on_bad_lines='skip', 
+        skiprows=[0,1,2,3,4,5,6,7,8], 
+        usecols=[
+            "first_seen_utc", "sha256_hash", "md5_hash", "sha1_hash",
+            "file_name", "file_type_guess", "signature"], 
+        header=None)
+    flagged_rows = []
+    # map hash functions to their CSV columns
+    hash_reqs = {
+        "MD5": (hashlib.md5, "md5_hash"),
+        "SHA1": (hashlib.sha1, "sha1_hash"),
+        "SHA256": (hashlib.sha256, "sha256_hash")
+    }
     # get the hash of the file
-    md5 = get_hash(file_path, hashlib.md5)
-    sha1 = get_hash(file_path, hashlib.sha1)
-    sha256 = get_hash(file_path, hashlib.sha256)
-    
-    # check if the hashes are in the CSV file
-    if md5 in mb_list[2].values:
-        print(f"MD5 hash {md5} found in CSV file.")
-        flagged_hashes.append(md5)
-    else:
-        print(f"MD5 hash {md5} not found in CSV file.")
-    
-    if sha1 in mb_list[3].values:
-        print(f"SHA1 hash {sha1} found in CSV file.")
-        flagged_hashes.append(sha1)
-    else:
-        print(f"SHA1 hash {sha1} not found in CSV file.")
-    
-    if sha256 in mb_list[1].values:
-        print(f"SHA256 hash {sha256} found in CSV file.")
-        flagged_hashes.append(sha256)
-    else:
-        print(f"SHA256 hash {sha256} not found in CSV file.")
+    for name, (hash_func, column_name) in hash_reqs.items():
+        hash_value = get_hash(file_path, hash_func)
+        # Find rows where hash matches
+        matches = mb_list[mb_list[column_name] == hash_value]
 
-    # if any of the hashes are found, return the flagged hashes
-    if flagged_hashes:
-        return flagged_hashes
+        if not matches.empty:
+            print(f"{name} hash {hash_value} found in CSV file.")
+            # Add all matched rows (as dicts) to list
+            for _, row in matches.iterrows():
+                flagged_rows.append(row.to_dict())
+        else:
+            print(f"{name} hash {hash_value} not found in CSV file.")
+
+    if flagged_rows:
+        return flagged_rows
     else:
         print("No matching hashes found in CSV file.")
         return None
+    
+# generate an html report as a string, parse data from each row
+def generate_html_report(flagged_rows):
+    html = """
+    <html>
+    <head><title>Malware Scan Report</title></head>
+    <body>
+    <h1>Malware Scan Results</h1>
+    <table border="1" cellpadding="5" cellspacing="0">
+        <tr>
+            <th>First Seen</th>
+            <th>SHA256 Hash</th>
+            <th>MD5 Hash</th>
+            <th>SHA1 Hash</th>
+            <th>File Name</th>
+            <th>File Type Guess</th>
+            <th>Signature</th>
+        </tr>
+    """
+
+    for row in flagged_rows:
+        html += f"""
+        <tr>
+            <td>{row.get('first_seen_utc', '')}</td>
+            <td>{row.get('sha256_hash', '')}</td>
+            <td>{row.get('md5_hash', '')}</td>
+            <td>{row.get('sha1_hash', '')}</td>
+            <td>{row.get('file_name', '')}</td>
+            <td>{row.get('file_type_guess', '')}</td>
+            <td>{row.get('signature', '')}</td>
+        </tr>
+        """
+
+    html += """
+    </table>
+    </body>
+    </html>
+    """
+    return html
 
 # formats a given drive with a partition of 512 megabytes, leaving the rest unallocated until needed
 # for a windows system
@@ -252,7 +293,13 @@ def main():
     # append a partition to the drive if all 3 hashes match in results, with user confirmation
     # also copies the file to the new partition to isloate it, deleting the original file
     if results:
-        print("All hashes matched in the CSV file. Do you want to append a partition to the drive? (y/n)")
+        #export html file to working directory
+        html_report = generate_html_report(results)
+        with open("malware_report.html", "w") as f:
+            f.write(html_report)
+        print("Malware report saved as 'malware_report.html'.")
+        #partitioning logic
+        print("All hashes matched in the CSV file. Do you want to append a partition to the drive and move the malware? (y/n)")
         append_partition_choice = input().strip().lower()
         if append_partition_choice == 'y':
             print("Available drives:")
