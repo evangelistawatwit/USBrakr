@@ -11,6 +11,7 @@ from zipfile import ZipFile
 from urllib.request import urlopen
 import subprocess
 import psutil
+from datetime import datetime
 
 # setup and install wget if not already installed
 try:
@@ -73,16 +74,14 @@ def compare_to_csv(file_path):
         csv_list, 
         on_bad_lines='skip', 
         skiprows=[0,1,2,3,4,5,6,7,8], 
-        usecols=[
-            "first_seen_utc", "sha256_hash", "md5_hash", "sha1_hash",
-            "file_name", "file_type_guess", "signature"], 
+        usecols=[0,1,2,3,4,5,6,7,8,9,10,11,12], 
         header=None)
     flagged_rows = []
     # map hash functions to their CSV columns
     hash_reqs = {
-        "MD5": (hashlib.md5, "md5_hash"),
-        "SHA1": (hashlib.sha1, "sha1_hash"),
-        "SHA256": (hashlib.sha256, "sha256_hash")
+        "MD5": (hashlib.md5, 2),
+        "SHA1": (hashlib.sha1, 3),
+        "SHA256": (hashlib.sha256, 1)
     }
     # get the hash of the file
     for name, (hash_func, column_name) in hash_reqs.items():
@@ -225,7 +224,22 @@ def get_file_size(file_path):
         print(f"File {file_path} does not exist.")
         return None
     
-
+# export log file detailing threat report to a .txt file
+def export_log(flagged_hashes, scanned_file):
+    file_name = "Log_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".txt"
+    with open(file_name, 'w') as log_file:
+        log_file.write("Malware Scan Report\n")
+        log_file.write(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        log_file.write(f"Scanned File: {scanned_file}\n")
+        log_file.write(f"File Size: {get_file_size(scanned_file)} bytes\n")
+        log_file.write("\n")
+        log_file.write("Hash Results:\n")
+        if flagged_hashes:
+            log_file.write("Flagged Hashes:\n")
+            for row in flagged_hashes:
+                log_file.write(f"{row}\n")
+        else:
+            log_file.write("No flagged hashes found.\n")
 
 
 # main function
@@ -290,6 +304,9 @@ def main():
     # compare the hashes to the CSV file
     results = compare_to_csv(path)
 
+    # export log file
+    export_log(results, path)
+
     # append a partition to the drive if all 3 hashes match in results, with user confirmation
     # also copies the file to the new partition to isloate it, deleting the original file
     if results:
@@ -301,32 +318,35 @@ def main():
         #partitioning logic
         print("All hashes matched in the CSV file. Do you want to append a partition to the drive and move the malware? (y/n)")
         append_partition_choice = input().strip().lower()
-        if append_partition_choice == 'y':
-            print("Available drives:")
-            drives = get_drives()
-            for drive in drives:
-                print(drive)
-            print("Enter the USB drive letter to append the partition (e.g., E, F):")
-            drive_letter = input().strip().upper()
-            if append_partition(drive_letter, size + 512 * 1024 * 1024):
-                # copy the file to the new partition (next letter after the drive letter)
-                new_drive_letter = chr(ord(drive_letter) + 1)
-                new_file_path = f"{new_drive_letter}:/{name}"
-                try:
-                    os.makedirs(f"{new_drive_letter}:/", exist_ok=True)
-                    with open(path, 'rb') as src_file:
-                        with open(new_file_path, 'wb') as dest_file:
-                            dest_file.write(src_file.read())
-                    print(f"File copied to {new_file_path}.")
-                    # delete the original file
-                    os.remove(path)
-                    print(f"Original file {path} deleted.")
-                except Exception as e:
-                    print(f"Error copying file: {e}")
+
+        # commented out for ease of testing since I know this works
+
+        # if append_partition_choice == 'y':
+        #     print("Available drives:")
+        #     drives = get_drives()
+        #     for drive in drives:
+        #         print(drive)
+        #     print("Enter the USB drive letter to append the partition (e.g., E, F):")
+        #     drive_letter = input().strip().upper()
+        #     if append_partition(drive_letter, size + 512 * 1024 * 1024):
+        #         # copy the file to the new partition (next letter after the drive letter)
+        #         new_drive_letter = chr(ord(drive_letter) + 1)
+        #         new_file_path = f"{new_drive_letter}:/{name}"
+        #         try:
+        #             os.makedirs(f"{new_drive_letter}:/", exist_ok=True)
+        #             with open(path, 'rb') as src_file:
+        #                 with open(new_file_path, 'wb') as dest_file:
+        #                     dest_file.write(src_file.read())
+        #             print(f"File copied to {new_file_path}.")
+        #             # delete the original file
+        #             os.remove(path)
+        #             print(f"Original file {path} deleted.")
+        #         except Exception as e:
+        #             print(f"Error copying file: {e}")
                 
             
-        else:
-            print("Skipping partition appending.")
+        # else:
+        #     print("Skipping partition appending.")
     else:
         print("No matching hashes found in CSV file. Skipping partition appending.")
     
