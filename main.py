@@ -86,6 +86,7 @@ def compare_to_csv(file_path):
     # get the hash of the file
     for name, (hash_func, column_name) in hash_reqs.items():
         hash_value = get_hash(file_path, hash_func)
+        print("File: " + file_path)
         # Find rows where hash matches
         matches = mb_list[mb_list[column_name] == hash_value]
 
@@ -100,7 +101,7 @@ def compare_to_csv(file_path):
     if flagged_rows:
         return flagged_rows
     else:
-        print("No matching hashes found in CSV file.")
+        print("No matching hashes for " + file_path + " found in CSV file.")
         return None
     
 # generate an html report as a string, parse data from each row
@@ -225,21 +226,51 @@ def get_file_size(file_path):
         return None
     
 # export log file detailing threat report to a .txt file
-def export_log(flagged_hashes, scanned_file):
+def export_log(flagged_hashes, scanned_files, choices=["n", "", "n", "", "n", ""]):
     file_name = "Log_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".txt"
     with open(file_name, 'w') as log_file:
-        log_file.write("Malware Scan Report\n")
+        log_file.write("User Choices:\n\n")
+        log_file.write("Format Drive?: " + str(choices[0]) + '\n')
+        if choices[0] == 'y':
+            log_file.write("Drive Letter: " + choices[1] + '\n')
+        log_file.write("Update CSV?: " + str(choices[2]) + '\n')
+        log_file.write("File Path: " + choices[3] + "\n\n")
+        log_file.write("Append Partition?: " + choices[4] + '\n')
+        if choices[4] == 'y':
+            log_file.write("Drive Letter?: " + choices[5] + '\n\n')
+        else:
+            log_file.write('\n')
+
+        log_file.write("Malware Scan Report\n\n")
         log_file.write(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-        log_file.write(f"Scanned File: {scanned_file}\n")
-        log_file.write(f"File Size: {get_file_size(scanned_file)} bytes\n")
+        log_file.write(f"Scanned Files:\n")
+        for file in scanned_files:
+            if(os.path.isdir(file)):
+                continue
+            log_file.write(f"{file}")
+            log_file.write(f"Size: {get_file_size(file)} bytes\n")
+            log_file.write(f"MD5: {get_hash(file, hashlib.md5)}\n")
+            log_file.write(f"SHA1: {get_hash(file, hashlib.sha1)}\n")
+            log_file.write(f"SHA256: {get_hash(file, hashlib.sha256)}\n\n")
+        
         log_file.write("\n")
         log_file.write("Hash Results:\n")
         if flagged_hashes:
-            log_file.write("Flagged Hashes:\n")
+            log_file.write("Flagged Hashes: \n")
             for row in flagged_hashes:
                 log_file.write(f"{row}\n")
         else:
-            log_file.write("No flagged hashes found.\n")
+            log_file.write("No flagged hashes found.\n\n")
+
+def file_lister(path):
+    if os.path.isdir(path):
+        files = [os.path.join(path, file) for file in os.listdir(path) if os.path.isfile(os.path.join(path, file))]
+        print("Directory detected. The following files will be scanned:")
+        for file in files:
+            print(file)
+    else:
+        files = [path]
+    return files
 
 
 # main function
@@ -247,6 +278,7 @@ def main():
     # format the drive if the user wants to
     print("Do you want to format the drive? (y/N)")
     format_drive_choice = input().strip().lower()
+    choices = [format_drive_choice]
     if format_drive_choice == 'y':
         print("Available drives:")
         drives = get_drives()
@@ -261,11 +293,13 @@ def main():
             print("Drive formatting cancelled.")
     else:
         print("Skipping drive formatting.")
+    choices.append(drive_letter if format_drive_choice == 'y' else "")
     # update the CSV file if the user already has it
     if active_cnx() is True:
         if os.path.isfile(csv_list):
             print(f"CSV file {csv_list} already exists. Do you want to update it? (y/N)")
             update_choice = input().strip().lower()
+            choices.append('y' if update_choice == 'y' else 'n')
             if update_choice == 'y':
                 update()
             else:
@@ -274,82 +308,108 @@ def main():
             print(f"CSV file {csv_list} does not exist. Downloading it...")
             update()
     else:
-        print("No active internet connection. Aborting.")
-        sys.exit(1)
+        print("No active internet connection. Skipping...")
+        choices.append('n')
+    
     # get the file path
     print("Enter the file path to get the hashes:")
     path = input().strip()
+    choices.append(path)
+
     # check if the file path is provided
     if not path:
         print("No file path provided. Exiting.")
         sys.exit(1)
-    # check if the file exists
-    if not os.path.isfile(path):
-        print(f"File {path} does not exist. Exiting.")
+    # check if the path exists
+    if not os.path.exists(path):
+        print(f"Path {path} does not exist. Exiting.")
         sys.exit(1)
-    # file name and size
-    name = os.path.basename(path)
-    size = os.path.getsize(path)
-    # hashes
-    md5 = get_hash(path, hashlib.md5)
-    sha1 = get_hash(path, hashlib.sha1)
-    sha256 = get_hash(path, hashlib.sha256)
-    # print the results
-    print(f"File: {name}")
-    print(f"Size: {size} bytes")
-    print(f"MD5: {md5}")
-    print(f"SHA1: {sha1}")
-    print(f"SHA256: {sha256} \n")
+
+    # makes list of files
+    files = file_lister(path)
+    # dictionary for hashes
+    hash_dict = {}
+    results = []
+    flagged_files = []
+    # loop to get all 3 hash types per file
+    # and size/name
+    for file in files:
+        if(os.path.isdir(file)):
+            continue
+        name = os.path.basename(file)
+        size = get_file_size(file)
+        md5 = get_hash(file, hashlib.md5)
+        sha1 = get_hash(file, hashlib.sha1)
+        sha256 = get_hash(file, hashlib.sha256)
+        hash_dict[name] = {"name": name, "size": size, "md5": md5, "sha1": sha1, "sha256": sha256}
+        print(f"File: {name}")
+        print(f"Size: {size} bytes")
+        print(f"MD5: {md5}")
+        print(f"SHA1: {sha1}")
+        print(f"SHA256: {sha256}\n")
+
 
     # compare the hashes to the CSV file
-    results = compare_to_csv(path)
-
-    # export log file
-    export_log(results, path)
+    for file in files:
+        if compare_to_csv(file):
+            results.append(compare_to_csv(file))
+            flagged_files.append(file)
 
     # append a partition to the drive if all 3 hashes match in results, with user confirmation
     # also copies the file to the new partition to isloate it, deleting the original file
-    if results:
+    if flagged_files:
         #export html file to working directory
-        html_report = generate_html_report(results)
-        with open("malware_report.html", "w") as f:
-            f.write(html_report)
-        print("Malware report saved as 'malware_report.html'.")
+        # I might have broken this function by changing this to a full directory scanner -Will
+        # html_report = generate_html_report(results)
+        # with open("malware_report.html", "w") as f:
+            # f.write(html_report)
+        # print("Malware report saved as 'malware_report.html'.")
         #partitioning logic
-        print("All hashes matched in the CSV file. Do you want to append a partition to the drive and move the malware? (y/n)")
+        print("Found flagged hashes in the CSV file. Do you want to append a partition to the drive and move the malware? (y/n)")
         append_partition_choice = input().strip().lower()
+        choices.append('y' if append_partition_choice == 'y' else 'n')
 
-        # commented out for ease of testing since I know this works
-
-        # if append_partition_choice == 'y':
-        #     print("Available drives:")
-        #     drives = get_drives()
-        #     for drive in drives:
-        #         print(drive)
-        #     print("Enter the USB drive letter to append the partition (e.g., E, F):")
-        #     drive_letter = input().strip().upper()
-        #     if append_partition(drive_letter, size + 512 * 1024 * 1024):
-        #         # copy the file to the new partition (next letter after the drive letter)
-        #         new_drive_letter = chr(ord(drive_letter) + 1)
-        #         new_file_path = f"{new_drive_letter}:/{name}"
-        #         try:
-        #             os.makedirs(f"{new_drive_letter}:/", exist_ok=True)
-        #             with open(path, 'rb') as src_file:
-        #                 with open(new_file_path, 'wb') as dest_file:
-        #                     dest_file.write(src_file.read())
-        #             print(f"File copied to {new_file_path}.")
-        #             # delete the original file
-        #             os.remove(path)
-        #             print(f"Original file {path} deleted.")
-        #         except Exception as e:
-        #             print(f"Error copying file: {e}")
-                
+        # I broke this part too, gonna try to fix 
+        if append_partition_choice == 'y':
+            print("Available drives:")
+            drives = get_drives()
+            for drive in drives:
+                print(drive)
+            print("Enter the USB drive letter to append the partition (e.g., E, F):")
+            drive_letter = input().strip().upper()
+            choices.append(drive_letter)
+            # Use the size of the largest flagged file for partition size
+            max_size = max(get_file_size(f) for f in flagged_files)
+            if append_partition(drive_letter, max_size + 512 * 1024 * 1024):
+                # copy each flagged file to the new partition (next letter after the drive letter)
+                new_drive_letter = chr(ord(drive_letter) + 1)
+                for flagged_file in flagged_files:
+                    name = os.path.basename(flagged_file)
+                    new_file_path = f"{new_drive_letter}:/{name}"
+                    try:
+                        os.makedirs(f"{new_drive_letter}:/", exist_ok=True)
+                        with open(flagged_file, 'rb') as src_file:
+                            with open(new_file_path, 'wb') as dest_file:
+                                dest_file.write(src_file.read())
+                        print(f"File copied to {new_file_path}.")
+                        # delete the original file
+                        os.remove(flagged_file)
+                        print(f"Original file {flagged_file} deleted.")
+                    except Exception as e:
+                        print(f"Error copying file {flagged_file}: {e}")
             
-        # else:
-        #     print("Skipping partition appending.")
+        else:
+            print("Skipping partition appending.")
+            choices.append('')
+
     else:
         print("No matching hashes found in CSV file. Skipping partition appending.")
+        choices.append('n')
+        choices.append('')
+        
     
+    # export the log file
+    export_log(results, files, choices)
 
 
 main()
