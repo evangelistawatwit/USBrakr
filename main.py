@@ -3,16 +3,6 @@
 # takes a given file and pull its 
 # MD5, SHA256, and SHA1 hashes
 
-import hashlib
-import sys
-import os
-import csv
-from zipfile import ZipFile
-from urllib.request import urlopen
-import subprocess
-import psutil
-from datetime import datetime
-
 # setup and install wget if not already installed
 try:
     import wget, pandas as pd
@@ -20,6 +10,15 @@ except ImportError:
     print("wget not found, installing...")
     os.system('pip install wget pandas')
     import wget, pandas as pd
+
+import hashlib
+import sys
+import os
+import csv
+from zipfile import ZipFile
+from urllib.request import urlopen
+import subprocess
+from datetime import datetime
 
 # predownloaded CSV file for compatibility testing
 csv_list = "full.csv"
@@ -69,19 +68,27 @@ def get_hash(file_path, hash_func):
 
 # Returns the given file's hash if it exists in the given CSV file
 def compare_to_csv(file_path):
+    column_names = [
+        'first_seen_utc', 'sha256_hash', 'md5_hash', 'sha1_hash',
+        'col4', 'col5', 'col6', 'col7', 'file_name', 'file_type_guess',
+        'col10', 'col11', 'signature'
+    ]
     # read the CSV file
+    # only the first 13 columns, skip top 9 rows
     mb_list = pd.read_csv(
-        csv_list, 
-        on_bad_lines='skip', 
-        skiprows=[0,1,2,3,4,5,6,7,8], 
-        usecols=[0,1,2,3,4,5,6,7,8,9,10,11,12], 
-        header=None)
+        csv_list,
+        on_bad_lines='skip',
+        skiprows=range(9),
+        usecols=range(13),
+        header=None,
+        names=column_names
+    )
     flagged_rows = []
     # map hash functions to their CSV columns
     hash_reqs = {
-        "MD5": (hashlib.md5, 2),
-        "SHA1": (hashlib.sha1, 3),
-        "SHA256": (hashlib.sha256, 1)
+        "MD5": (hashlib.md5, 'md5_hash'),
+        "SHA1": (hashlib.sha1, 'sha1_hash'),
+        "SHA256": (hashlib.sha256, 'sha256_hash')
     }
     # get the hash of the file
     for name, (hash_func, column_name) in hash_reqs.items():
@@ -359,11 +366,11 @@ def main():
     # also copies the file to the new partition to isloate it, deleting the original file
     if flagged_files:
         #export html file to working directory
-        # I might have broken this function by changing this to a full directory scanner -Will
-        # html_report = generate_html_report(results)
-        # with open("malware_report.html", "w") as f:
-            # f.write(html_report)
-        # print("Malware report saved as 'malware_report.html'.")
+        # fixed - NEEDS TESTING
+        html_report = generate_html_report(results)
+        with open("malware_report.html", "w") as f:
+            f.write(html_report)
+        print("Malware report saved as 'malware_report.html'.")
         #partitioning logic
         print("Found flagged hashes in the CSV file. Do you want to append a partition to the drive and move the malware? (y/n)")
         append_partition_choice = input().strip().lower()
