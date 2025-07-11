@@ -49,9 +49,6 @@ def update():
     os.remove(file_name)
     csv_list = 'full.csv'
 
-# I'll condense the open in binary parts into it's own function - done
-# Condensed it all into one function
-
 # Returns binary data from a given file and given hash functions
 def get_hash(file_path, hash_func):
     # hash object
