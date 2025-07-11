@@ -4,6 +4,7 @@
 # MD5, SHA256, and SHA1 hashes
 
 # setup and install wget if not already installed
+import os
 try:
     import wget, pandas as pd
 except ImportError:
@@ -13,12 +14,13 @@ except ImportError:
 
 import hashlib
 import sys
-import os
-import csv
 from zipfile import ZipFile
 from urllib.request import urlopen
 import subprocess
 from datetime import datetime
+import tkinter as tk
+from tkinter import messagebox, simpledialog
+
 
 # predownloaded CSV file for compatibility testing
 csv_list = "full.csv"
@@ -279,55 +281,85 @@ def file_lister(path):
 
 # main function
 def main():
-    # format the drive if the user wants to
-    print("Do you want to format the drive? (y/N)")
-    format_drive_choice = input().strip().lower()
+    # GUI-based format drive prompt
+    root = tk.Tk()
+    root.withdraw()  # Hide root window
+    format_drive_choice = messagebox.askyesno("Format Drive", "Do you want to format the drive?")
+    format_drive_choice = 'y' if format_drive_choice else 'n'
     choices = [format_drive_choice]
+
+    drive_letter = ""
     if format_drive_choice == 'y':
-        print("Available drives:")
         drives = get_drives()
-        for drive in drives:
-            print(drive)
-        print("Enter the USB drive letter to format (e.g., E, F):")
-        drive_letter = input().strip().upper()
-        if input(f"Are you sure you want to format drive {drive_letter}? This will erase all data on the drive. (y/N) ").strip().lower() == 'y':
-            if format_drive(drive_letter):
-                print(f"Drive {drive_letter} formatted successfully.")
+
+        if not drives:
+            messagebox.showerror("No Drives Found", "No available drives detected.")
         else:
-            print("Drive formatting cancelled.")
+            drive_letter = simpledialog.askstring(
+                "Select Drive",
+                "Available drives:\n" + "\n".join(drives) + "\n\nEnter the drive letter to format (e.g., E):",
+                parent=root
+            )
+
+            if not drive_letter:
+                messagebox.showinfo("Cancelled", "Drive formatting cancelled.")
+            else:
+                drive_letter = drive_letter.strip().upper()
+                confirm = messagebox.askyesno(
+                    "Confirm Format",
+                    f"Are you sure you want to format drive {drive_letter}? This will erase all data on the drive."
+                )
+                if confirm:
+                    if format_drive(drive_letter):
+                        messagebox.showinfo("Success", f"Drive {drive_letter} formatted successfully.")
+                    else:
+                        messagebox.showerror("Error", f"Failed to format drive {drive_letter}.")
+                else:
+                    messagebox.showinfo("Cancelled", "Drive formatting cancelled.")
     else:
         print("Skipping drive formatting.")
+
     choices.append(drive_letter if format_drive_choice == 'y' else "")
+    
     # update the CSV file if the user already has it
-    if active_cnx() is True:
+    if active_cnx():
         if os.path.isfile(csv_list):
-            print(f"CSV file {csv_list} already exists. Do you want to update it? (y/N)")
-            update_choice = input().strip().lower()
-            choices.append('y' if update_choice == 'y' else 'n')
+            update_choice = messagebox.askyesno(
+                "Update CSV",
+                f"CSV file {csv_list} already exists.\nDo you want to update it?"
+            )
+            update_choice = 'y' if update_choice else 'n'
+            choices.append(update_choice)
             if update_choice == 'y':
                 update()
             else:
-                print("Skipping CSV file update.")
+                messagebox.showinfo("Info", "Skipping CSV file update.")
         else:
-            print(f"CSV file {csv_list} does not exist. Downloading it...")
+            messagebox.showinfo("Info", f"CSV file {csv_list} does not exist. Downloading")
+            choices.append('y')
             update()
     else:
-        print("No active internet connection. Skipping...")
+        messagebox.showwarning("No Connection", "No active internet connection. Skipping.")
         choices.append('n')
     
-    # get the file path
-    print("Enter the file path to get the hashes:")
-    path = input().strip()
+    from tkinter import filedialog
+
+    # Prompt user to select a file or folder
+    file_or_dir = messagebox.askquestion("Select Input Type", "Do you want to scan a file? (No = scan a folder)")
+    if file_or_dir == 'yes':
+        path = filedialog.askopenfilename(title="Select a file to scan")
+    else:
+        path = filedialog.askdirectory(title="Select a folder to scan")
+
     choices.append(path)
 
-    # check if the file path is provided
     if not path:
-        print("No file path provided. Exiting.")
+        messagebox.showerror("Error", "No file or folder selected. Exiting.")
         sys.exit(1)
-    # check if the path exists
     if not os.path.exists(path):
-        print(f"Path {path} does not exist. Exiting.")
+        messagebox.showerror("Error", f"Path {path} does not exist. Exiting.")
         sys.exit(1)
+
 
     # makes list of files
     files = file_lister(path)
@@ -369,39 +401,50 @@ def main():
             f.write(html_report)
         print("Malware report saved as 'malware_report.html'.")
         #partitioning logic
-        print("Found flagged hashes in the CSV file. Do you want to append a partition to the drive and move the malware? (y/n)")
-        append_partition_choice = input().strip().lower()
-        choices.append('y' if append_partition_choice == 'y' else 'n')
 
-        # I broke this part too, gonna try to fix 
-        if append_partition_choice == 'y':
-            print("Available drives:")
+        append_partition_choice = messagebox.askyesno(
+            "Partition Append",
+            "Found flagged hashes in the CSV file.\nDo you want to append a partition to the drive and move the malware?"
+        )
+        choices.append('y' if append_partition_choice else 'n')
+
+        if append_partition_choice:
             drives = get_drives()
-            for drive in drives:
-                print(drive)
-            print("Enter the USB drive letter to append the partition (e.g., E, F):")
-            drive_letter = input().strip().upper()
-            choices.append(drive_letter)
-            # Use the size of the largest flagged file for partition size
-            max_size = max(get_file_size(f) for f in flagged_files)
-            if append_partition(drive_letter, max_size + 512 * 1024 * 1024):
-                # copy each flagged file to the new partition (next letter after the drive letter)
-                new_drive_letter = chr(ord(drive_letter) + 1)
-                for flagged_file in flagged_files:
-                    name = os.path.basename(flagged_file)
-                    new_file_path = f"{new_drive_letter}:/{name}"
-                    try:
-                        os.makedirs(f"{new_drive_letter}:/", exist_ok=True)
-                        with open(flagged_file, 'rb') as src_file:
-                            with open(new_file_path, 'wb') as dest_file:
-                                dest_file.write(src_file.read())
-                        print(f"File copied to {new_file_path}.")
-                        # delete the original file
-                        os.remove(flagged_file)
-                        print(f"Original file {flagged_file} deleted.")
-                    except Exception as e:
-                        print(f"Error copying file {flagged_file}: {e}")
-            
+            if not drives:
+                messagebox.showerror("No Drives Found", "No available drives detected.")
+            else:
+                drive_letter = simpledialog.askstring(
+                    "Select Drive",
+                    "Available drives:\n" + "\n".join(drives) + "\n\nEnter the USB drive letter to append the partition (e.g., E):",
+                    parent=root
+                )
+                if not drive_letter:
+                    messagebox.showinfo("Cancelled", "Partition appending cancelled.")
+                    choices.append('')
+                else:
+                    drive_letter = drive_letter.strip().upper()
+                    choices.append(drive_letter)
+                    # Use the size of the largest flagged file for partition size
+                    max_size = max(get_file_size(f) for f in flagged_files)
+                    if append_partition(drive_letter, max_size + 512 * 1024 * 1024):
+                        # copy each flagged file to the new partition (next letter after the drive letter)
+                        new_drive_letter = chr(ord(drive_letter) + 1)
+                        for flagged_file in flagged_files:
+                            name = os.path.basename(flagged_file)
+                            new_file_path = f"{new_drive_letter}:/{name}"
+                            try:
+                                os.makedirs(f"{new_drive_letter}:/", exist_ok=True)
+                                with open(flagged_file, 'rb') as src_file:
+                                    with open(new_file_path, 'wb') as dest_file:
+                                        dest_file.write(src_file.read())
+                                print(f"File copied to {new_file_path}.")
+                                # delete the original file
+                                os.remove(flagged_file)
+                                print(f"Original file {flagged_file} deleted.")
+                            except Exception as e:
+                                print(f"Error copying file {flagged_file}: {e}")
+                    else:
+                        messagebox.showerror("Error", f"Failed to append partition on drive {drive_letter}.")
         else:
             print("Skipping partition appending.")
             choices.append('')
