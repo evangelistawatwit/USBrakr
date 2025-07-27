@@ -32,8 +32,10 @@ pyinstaller --onefile --windowed --uac-admin --name "USBrakr_Scanner" app.py
 ### Executing the program
 * how to run step by step
 ```
-ex. command
+python app.py
 ```
+Or run the compiled .EXE
+NOTE: make sure the full.csv file is in the same directory as the .EXE or .PY
 ## Authors
 Conner Pattison
 [patt-co]
