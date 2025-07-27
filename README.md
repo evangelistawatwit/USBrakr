@@ -25,6 +25,10 @@ python3 -m pip install -r requirements.txt
 ```
 ### Installing
 * procedure on formatting drive and installing script
+### Compiling
+```
+pyinstaller --onefile --windowed --uac-admin --name "USBrakr_Scanner" app.py
+```
 ### Executing the program
 * how to run step by step
 ```
